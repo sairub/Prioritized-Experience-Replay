@@ -26,7 +26,7 @@ import matplotlib.image as mpimg
 import pylab
 
 from Prioritized_Replay import Replay_Agent_Memory
-from network import DQN
+from Network import DQN
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
