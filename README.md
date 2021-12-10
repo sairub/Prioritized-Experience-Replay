@@ -1,2 +1,2 @@
-# Priority Experience Replay and Experience Replay to DQNs
+# Prioritized Experience Replay and Experience Replay to DQNs
 
