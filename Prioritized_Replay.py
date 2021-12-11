@@ -1,59 +1,194 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[8]:
 
 
-import collections
+import gym
+import random
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision
+import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
 import numpy as np
+import torch.optim as optim
+import torch as T
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import pylab
 
-class Replay_Agent_Memory():
-    def __init__(self, max_size, input_shape, n_actions):
-        self.size = max_size
-        self.priorities = collections.deque(maxlen=self.size)
-        self.inp_shape = input_shape
-        self.mem_cntr = 0
+from Prioritized_Replay import Replay_Agent_Memory
+from Agent import Agent
+from Network import DQN
 
-        self.state_memory = np.zeros((self.size,*self.inp_shape), dtype=np.float32)
-        self.new_state_memory =np.zeros((self.size,*self.inp_shape), dtype=np.float32)
-        self.action_memory = np.zeros(self.size,dtype=np.int64)
-        self.reward_memory = np.zeros(self.size, dtype=np.float32)
-        self.terminal_memory = np.zeros(self.size, dtype=np.bool)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    def store_transition(self, state, action, reward, next_state, done):
-        index = self.mem_cntr % self.size 
-        self.state_memory[index] = state
-        self.action_memory[index] = action
-        self.reward_memory[index] = reward
-        self.next_memory[index] = next_state
-        self.final_memory[index] = done
-        self.priorities.append(max(self.priorities, default=1))
-        self.mem_cntr += 1
+env = gym.make('SpaceInvaders-v0')
+env.reset()
+height, width, channels = env.observation_space.shape
+print(env.observation_space.shape)
+print(env.action_space)
+actions = env.action_space
+observation, reward, done, info = env.step(3)
+#imgplot = plt.imshow(observation)
+
+
+# In[9]:
+
+
+print("Enter 'e' for Experience Replay and 'p' for Prioritized Experience Replay:")
+ans = input()
+
+
+# In[10]:
+
+
+if ans == 'e':
+    agent = Agent(ans,gamma=0.99,lr=0.001,epsilon=0.1,input_dims= env.observation_space.shape,n_actions=env.action_space.n,batch_size=1,max_mem_size=1000,eps_end=0.01) 
+    Q_eval = DQN(ans,lr = 0.001, input_dims= [100800], fc1_dims = 300, fc2_dims = 100, n_actions = 6)
     
-    def scaled_prob(self):
-        P = np.array(self.priorities)
-        P /= P.sum() #Check formula for more information
-        return P
-    
-    def prob_imp(self, prob, beta):
-        self.beta = beta
-        i =  (1/self.size * 1/prob)**(-self.beta)
-        i /= max(i)
-        return i
+    x1 = observation[:,:,0]
+    x2 = observation[:,:,1]
+    x3 = observation[:,:,2]
+    observation_new = np.zeros((3,210,160), dtype = np.float32)
+    observation_new[0] = x1 
+    observation_new[1] = x2
+    observation_new[2] = x3
 
-    def sample(self, batch_size, beta):
-        max_mem = min(self.mem_cntr, self.size)
-        probability = self.scaled_prob()
-        info = np.random.choice(max_mem, batch_size, replace=False, p = prob)
-        states = self.state_memory[info]
-        actions = self.action_memory[info]
-        rewards = self.reward_memory[info]
-        observations_ = self.new_state_memory[info]
-        complete = self.terminal_memory[info]
-        imp = self.prob_imp(sample_probs[info], beta)
+    state = T.tensor([observation_new]).to(Q_eval.device)
+    actions = Q_eval.forward(state)
+    action = T.argmax(actions).item()
 
-        return states, actions, rewards, observations_, complete, imp, info
+    action_space = [0,1,2,3,4,5]
+    action = np.random.choice(action_space)
+
+    env.reset()
+
+    agent = Agent(ans, gamma=0.99,lr=0.001,epsilon=0.1,input_dims= observation_new.shape ,n_actions=env.action_space.n,batch_size=1,max_mem_size=1000,eps_end=0.01) 
+
+    scores = []
+    n_games = 10
+    losses = []
+    episodes = []
+
+    for i in range(n_games):
+        score = 0
+        done = False
+        observation = env.reset()
+        x1 = observation[:,:,0]
+        x2 = observation[:,:,1]
+        x3 = observation[:,:,2]
+        observation_new = np.zeros((3,210,160), dtype = np.float32)
+        observation_new[0] = x1 
+        observation_new[1] = x2
+        observation_new[2] = x3
+
+
+        while not done:
+
+            action = agent.choose_action(observation_new)
+            observation_, reward, done, info = env.step(action)
+            x1 = observation_[:,:,0]
+            x2 = observation_[:,:,1]
+            x3 = observation_[:,:,2]
+            observation_new_ = np.zeros((3,210,160), dtype = np.float32)
+            observation_new_[0] = x1 
+            observation_new_[1] = x2
+            observation_new_[2] = x3
+            #print(reward)
+
+            #env.render()
+            score += reward
+            agent.store_transition(observation_new, action, reward, observation_new_, done)
+            agent.learn()
+            observation_new = observation_new_
+
+        scores.append(score)
+
+        avg_score = np.mean(scores[-100:])
+        episodes.append(i)
+
+        print('episode ', i, 'score%.2f' % score,'average score %.2f' % avg_score)
+    pylab.plot(episodes, scores, 'b')
+
+
+# In[15]:
+
+
+if ans == 'p':
+    agent = Agent(ans, gamma=0.99,lr=0.001,epsilon=0.1,input_dims= env.observation_space.shape,n_actions=env.action_space.n,batch_size=1,max_mem_size=1000,eps_end=0.01) 
     
-    def prop_priority(self, i, err, c = 1.1, alpha_value = 0.7): #for proportional priority
-            self.priorities[i] = (np.abs(err) + c)** alpha_value
+    Q_eval = DQN(ans,lr = 0.001, input_dims= env.observation_space.shape, fc1_dims = 300, fc2_dims = 100, n_actions = env.action_space.n)
+    Q_next = DQN(ans,lr = 0.001, input_dims= env.observation_space.shape, fc1_dims = 300, fc2_dims = 100, n_actions = env.action_space.n)
+    
+    x1 = observation[:,:,0]
+    x2 = observation[:,:,1]
+    x3 = observation[:,:,2]
+    observation_new = np.zeros((3,210,160), dtype = np.float32)
+    observation_new[0] = x1 
+    observation_new[1] = x2
+    observation_new[2] = x3
+
+    state = T.tensor([observation_new]).to(Q_eval.device)
+    actions = Q_eval.forward(state)
+
+    env.reset()
+    action = T.argmax(actions[1]).item()
+
+    action_space = [0,1,2,3,4,5]
+    action = np.random.choice(action_space)
+    
+    agent = Agent(ans, gamma=0.99,lr=0.001,epsilon=0.1,input_dims= observation_new.shape ,n_actions=env.action_space.n,batch_size=1,max_mem_size=1000,eps_end=0.01) 
+
+    scores = []
+    n_games = 10
+    losses = []
+    episodes = []
+
+    for i in range(n_games):
+        score = 0
+        done = False
+        observation = env.reset()
+        x1 = observation[:,:,0]
+        x2 = observation[:,:,1]
+        x3 = observation[:,:,2]
+        observation_new = np.zeros((3,210,160), dtype = np.float32)
+        observation_new[0] = x1 
+        observation_new[1] = x2
+        observation_new[2] = x3
+
+
+        while not done:
+
+            action = agent.choose_action(observation_new)
+            observation_, reward, done, info = env.step(action)
+            x1 = observation_[:,:,0]
+            x2 = observation_[:,:,1]
+            x3 = observation_[:,:,2]
+            observation_new_ = np.zeros((3,210,160), dtype = np.float32)
+            observation_new_[0] = x1 
+            observation_new_[1] = x2
+            observation_new_[2] = x3
+            #print(reward)
+
+            #env.render()
+            score += reward
+            agent.store_transition(observation_new, action, reward, observation_new_, done)
+            agent.learn()
+            observation_new = observation_new_
+
+        scores.append(score)
+
+        avg_score = np.mean(scores[-100:])
+        episodes.append(i)
+        print('episode ', i, 'score%.2f' % score,'average score %.2f' % avg_score)
+    pylab.plot(episodes, scores, 'b')
+
+
+# In[ ]:
+
+
+
 
