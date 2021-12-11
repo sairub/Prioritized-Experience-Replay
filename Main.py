@@ -38,7 +38,7 @@ print(height,width, channels)
 actions = env.action_space
 print(actions)
 observation, reward, done, info = env.step(3)
-#imgplot = plt.imshow(observation)
+imgplot = plt.imshow(observation)
 
 
 print("Enter 'e' for Experience Replay and 'p' for Prioritized Experience Replay:")
@@ -97,7 +97,7 @@ if ans == 'e':
             observation_new_[2] = x3
             #print(reward)
 
-            #env.render()
+            env.render()
             score += reward
             agent.store_transition(observation_new, action, reward, observation_new_, done)
             agent.learn()
@@ -165,7 +165,7 @@ if ans == 'p':
             observation_new_[2] = x3
             #print(reward)
 
-            #env.render()
+            env.render()
             score += reward
             agent.store_transition(observation_new, action, reward, observation_new_, done)
             agent.learn()
