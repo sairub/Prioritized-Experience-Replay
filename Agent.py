@@ -80,6 +80,7 @@ class Agent():
     def choose_action(self,state):
         if np.random.random() > self.epsilon:
             state = T.tensor([state]).to(self.Q_eval.device)
+            print(state.shape)
             actions = self.Q_eval.forward(state)
             action = T.argmax(actions).item()
         else:
