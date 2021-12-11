@@ -15,10 +15,10 @@ class Replay_Agent_Memory():
         self.mem_cntr = 0
 
         self.state_memory = np.zeros((self.size,*self.inp_shape), dtype=np.float32)
-        self.next_memory =np.zeros((self.size,*self.inp_shape), dtype=np.float32)
+        self.next_memory = np.zeros((self.size,*self.inp_shape), dtype=np.float32)
         self.action_memory = np.zeros(self.size,dtype=np.int64)
         self.reward_memory = np.zeros(self.size, dtype=np.float32)
-        self.terminal_memory = np.zeros(self.size, dtype=np.bool)
+        self.final_memory = np.zeros(self.size, dtype=np.bool)
 
     def store_transition(self, state, action, reward, next_state, done):
         index = self.mem_cntr % self.size 
@@ -31,7 +31,7 @@ class Replay_Agent_Memory():
         self.mem_cntr += 1
     
     def scaled_prob(self):
-        P = np.array(self.priorities)
+        P = np.array(self.priorities, dtype = np.float64)
         P /= P.sum() #Check formula for more information
         return P
     
@@ -44,13 +44,13 @@ class Replay_Agent_Memory():
     def sample(self, batch_size, beta):
         max_mem = min(self.mem_cntr, self.size)
         probability = self.scaled_prob()
-        info = np.random.choice(max_mem, batch_size, replace=False, p = prob)
+        info = np.random.choice(max_mem, batch_size, replace=False, p = probability)
         states = self.state_memory[info]
         actions = self.action_memory[info]
         rewards = self.reward_memory[info]
         observations_ = self.next_memory[info]
-        complete = self.terminal_memory[info]
-        imp = self.prob_imp(sample_probs[info], beta)
+        complete = self.final_memory[info]
+        imp = self.prob_imp(probability[info], beta)
 
         return states, actions, rewards, observations_, complete, imp, info
     
