@@ -37,18 +37,13 @@ class DQN(nn.Module):
         self.conv1 = nn.Conv2d(in_channels= 3, out_channels= 32, kernel_size= (5,5), stride= (4,4))
         self.conv2 = nn.Conv2d(in_channels= 32, out_channels= 64, kernel_size= (3,3), stride= (2,2))
         self.conv3 = nn.Conv2d(in_channels= 64, out_channels= 64, kernel_size= (3,3), stride= (2,2))
-        if self.ans == 'e':
-            self.fc1 = nn.Linear(128, self.fc1_dims)
-            self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
-            self.fc3 = nn.Linear(self.fc2_dims, self.n_actions)
-            self.loss = nn.MSELoss()
 
-        if self.ans == 'p':
-            self.fc1 = nn.Linear(128, self.fc1_dims)
-            self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
-            self.fc3 = nn.Linear(self.fc2_dims, self.n_actions)
-            self.value = nn.Linear(self.fc2_dims,1)
-     
+        self.fc1 = nn.Linear(128, self.fc1_dims)
+        self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
+        self.fc3 = nn.Linear(self.fc2_dims, self.n_actions)
+        
+        self.loss = nn.MSELoss()
+
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
         self.to(self.device)
@@ -68,12 +63,7 @@ class DQN(nn.Module):
         x = torch.flatten(x)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        actions = self.fc3(x) #actions is advantage
-        
-        if self.ans == 'p':
-            val = self.value(x)
-            return val, actions
+        actions = self.fc3(x)
 
         return actions
-
 
