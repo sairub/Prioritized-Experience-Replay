@@ -1,239 +1,230 @@
 import tensorflow as T
 import gym
-import time
+import tensorflow.keras.optimizers as ko
 import numpy as np
 import tensorflow.keras.layers as kl
-import tensorflow.keras.optimizers as ko
 
 
-class DQN(T.keras.Model):
+class Model(T.keras.Model):
     def __init__(self, num_actions):
         super().__init__(name='basic_prddqn')
         self.fc1 = kl.Dense(32, activation='relu', kernel_initializer='he_uniform')
         self.fc2 = kl.Dense(32, activation='relu', kernel_initializer='he_uniform')
         self.final = kl.Dense(num_actions, name='q_values')
 
-    def forward(self, inputs):
+    def call(self, inputs):
         x = self.fc1(inputs)
         x = self.fc2(x)
         x = self.final(x)
         return x
 
-    def q_action(self, observation):
-        q_values = self.predict(observation)
+    def action_value(self, observations):
+        q_values = self.predict(observations)
         choose_action = np.argmax(q_values, axis=-1)
-        if choose_action.shape[0] > 1:
-            return choose_action
-        else:
-            return choose_action[0], q_values[0]
+        return choose_action if choose_action.shape[0] > 1 else choose_action[0], q_values[0]
 
 
 def test_dqn():
     env = gym.make('CartPole-v0')
-    dqn = DQN(env.action_space.n)
+    dqn = Model(env.action_space.n)
 
-    observation = env.reset()
+    observations = env.reset()
 
-    choose_action, q_values = dqn.q_action(observation[None])
-    print('Test DQN: ', choose_action, q_values)
+    choose_action, q_values = dqn.action_value(observations[None])
 
 
-class Prioritization:
-    def __init__(self, total):
-        self.total = total
-        self.memory_tree = np.zeros(2 * total - 1)
-        self.changes = np.empty(total, dtype=object)
-        self.next_index = 0
+class ReplayMemory:
+    def __init__(self, count_total):
+        self.count_total = count_total
+        self.mem_tree = np.zeros(2 * count_total - 1)
+        self.transitions = np.empty(count_total, dtype=object)
+        self.next_indices = 0
 
     @property
     def total_p(self):
-        return self.memory_tree[0]
+        return self.mem_tree[0]
 
-    def appenddd(self, priority, transition):
-        index = self.next_index + self.total - 1
-        self.changes[self.next_index] = transition
-        self.change(index, priority)
-        self.next_index = (self.next_index + 1) % self.total
+    def add(self, priority, transition):
+        i = self.next_indices + self.count_total - 1
+        self.transitions[self.next_indices] = transition
+        self.change_it(i, priority)
+        self.next_indices = (self.next_indices + 1) % self.count_total
 
-    def change(self, index, priority):
-        change = priority - self.memory_tree[index]
-        self.memory_tree[index] = priority
-        self.yo(index, change)
+    def change_it(self, i, priority):
+        change = priority - self.mem_tree[i]
+        self.mem_tree[i] = priority
+        self._propagate(i, change)
 
-    def yo(self, index, change):
-        branch_parent = (index - 1) // 2
-        self.memory_tree[branch_parent] += change
-        if branch_parent != 0:
-            self.yo(branch_parent, change)
+    def _propagate(self, i, change):
+        parent = (i - 1) // 2
+        self.mem_tree[parent] += change
+        if parent != 0:
+            self._propagate(parent, change)
 
-    def get_data(self, s):
-        index = self.find(0, s)
-        trans_index = index - self.total + 1
-        return index, self.memory_tree[index], self.changes[trans_index]
+    def getdata(self, s):
+        i = self.find(0, s)
+        trans_i = i - self.count_total + 1
+        return i, self.mem_tree[i], self.transitions[trans_i]
 
-    def find(self, index, s):
-        left = 2 * index + 1
+    def find(self, i, s):
+        left = 2 * i + 1
         right = left + 1
-        if left >= len(self.memory_tree):
-            return index
-        if s <= self.memory_tree[left]:
+        if left >= len(self.mem_tree):
+            return i
+        if s <= self.mem_tree[left]:
             return self.find(left, s)
         else:
-            return self.find(right, s - self.memory_tree[left])
+            return self.find(right, s - self.mem_tree[left])
 
 
 class Agent:
-    def __init__(self, dqn, target_dqn, env, lr=.0012, e=.1, e_dacay=0.995, e_min=.01,
-                 gamma=.9, size=8, target_update_iter=400, train_nums=5000, total_size=200, replay_time=20,
-                 alpha=0.4, beta=0.4, per_sample_beta=0.001):
+    def __init__(self, dqn, target_dqn, env, learning_rate=.0012, e=.1, e_dacay=0.995, min_e=.01,
+                 gamma=.9, size=8, target_update_iter=400, count_trainings=5000, mem_size=200, replay_time=20,
+                 alpha=0.4, beta=0.4, per_beta=0.001):
         self.dqn = dqn
         self.target_dqn = target_dqn
-        opt = ko.Adam(learning_rate=lr)
+
+        opt = ko.Adam(learning_rate=learning_rate) #Gradient
         self.dqn.compile(optimizer=opt, loss=self.loss)
 
-
+        # Hyper parameters
         self.env = env
-        self.lr = lr
+        self.lr = learning_rate
         self.e = e
         self.e_decay = e_dacay
-        self.e_min = e_min
+        self.min_e = min_e
         self.gamma = gamma
         self.size = size
         self.target_update_iter = target_update_iter
-        self.train_nums = train_nums
+        self.count_trainings = count_trainings
 
-        self.obs_b = np.empty((self.size,) + self.env.reset().shape)
+        self.b_observations = np.empty((self.size,) + self.env.reset().shape)
         self.act_b = np.empty(self.size, dtype=np.int8)
         self.rewards_b = np.empty(self.size, dtype=np.float32)
         self.next_states_b = np.empty((self.size,) + self.env.reset().shape)
-        self.b_dones = np.empty(self.size, dtype=np.bool)
+        self.completed = np.empty(self.size, dtype=np.bool)
 
-        self.replay_memory = Prioritization(total_size)
-        self.total_size = total_size
+        self.replay_memory = ReplayMemory(mem_size)
+        self.mem_size = mem_size
         self.replay_time = replay_time
         self.alpha = alpha
         self.beta = beta
-        self.per_sample_beta = per_sample_beta
-        self.total_number = 0
+        self.per_beta = per_beta
+        self.number_ = 0
         self.margin = 0.01
-        self.p1 = 1
-        self.wts = np.power(self.total_size, -self.beta)
+        self.prio = 1
+        self.wt = np.power(self.mem_size, -self.beta)
         self.abs_error_upper = 1
 
     def loss(self, y_target, y_pred):
-        return T.reduce_mean(self.wts * T.math.squared_difference(y_target, y_pred))
+        return T.reduce_mean(self.wt * T.math.squared_difference(y_target, y_pred))
 
     def train(self):
-        observation = self.env.reset()
-        for t in range(1, self.train_nums):
-            choose_action, q_values = self.dqn.q_action(observation[None])
-            action = self.action_model(choose_action)
-            next_observation, reward, done, info = self.env.step(action)
+        observations = self.env.reset()
+        for t in range(1, self.count_trainings):
+            choose_action, q_values = self.dqn.action_value(observations[None])
+            action = self.act(choose_action)
+            next_observations, reward, done, info = self.env.step(action)
             if t == 1:
-                p = self.p1
+                p = self.prio
             else:
-                p = np.max(self.replay_memory.memory_tree[-self.replay_memory.total:])
-            self.store_transition(p, observation, action, reward, next_observation, done)
-            self.total_number = min(self.total_number + 1, self.total_size)
+                p = np.max(self.replay_memory.mem_tree[-self.replay_memory.count_total:])
+            self.store_transition(p, observations, action, reward, next_observations, done)
+            self.number_ = min(self.number_ + 1, self.mem_size)
 
-            if t > self.total_size:
-                losses = self.trainings()
+            if t > self.mem_size:
+                l = self.training()
                 if t % 1000 == 0:
-                    print('losses each 1000 steps: ', losses)
+                    print('Loss at every 1000 steps = ', l)
 
             if t % self.target_update_iter == 0:
-                self.update_target_dqn()
+                self.change_target_dqn()
             if done:
-                observation = self.env.reset()
+                observations = self.env.reset()
             else:
-                observation = next_observation
+                observations = next_observations
 
-    def trainings(self):
-        index, self.wts = self.Sampling_Priority(self.size)
-        choose_action_index, _ = self.dqn.q_action(self.next_states_b)
-        target_q = self.get_data_part_2(self.next_states_b)
-        td_target = self.rewards_b + self.gamma * target_q[np.arange(target_q.shape[0]), choose_action_index] * (1 - self.b_dones)
-        predict_q = self.dqn.predict(self.obs_b)
-        td_predict = predict_q[np.arange(predict_q.shape[0]), self.act_b]
-        abs_td_error = np.abs(td_target - td_predict) + self.margin
-        clipped_error = np.where(abs_td_error < self.abs_error_upper, abs_td_error, self.abs_error_upper)
-        ps = clipped_error ** self.alpha
-        for index, p in zip(index, ps):
-            self.replay_memory.change(index, p)
+    def training(self):
+        index, self.wt = self.Sampling_Priority(self.size)
+        choose_action_index, _ = self.dqn.action_value(self.next_states_b)
+        target_predicition = self.get_target_value(self.next_states_b)
+        err_target = self.rewards_b + \
+            self.gamma * target_predicition[np.arange(target_predicition.shape[0]), choose_action_index] * (1 - self.completed)
+        make_predicition = self.dqn.predict(self.b_observations)
+        err = make_predicition[np.arange(make_predicition.shape[0]), self.act_b]
+        temporal_err = np.abs(err_target - err) + self.margin
+        c = np.where(temporal_err < self.abs_error_upper, temporal_err, self.abs_error_upper)
+        ps = np.power(c, self.alpha)
+        for i, p in zip(index, ps):
+            self.replay_memory.change_it(i, p)
 
         for i, val in enumerate(self.act_b):
-            predict_q[i][val] = td_target[i]
+            make_predicition[i][val] = err_target[i]
 
-        target_q = predict_q
-        losses = self.dqn.train_on_batch(self.obs_b, target_q)
+        target_predicition = make_predicition
+        l = self.dqn.train_on_batch(self.b_observations, target_predicition)
 
-        return losses
+        return l
 
     def Sampling_Priority(self, k):
-        id_list = []
-        wtss = np.empty((k, 1))
-        self.beta = min(1., self.beta + self.per_sample_beta)
-        min_prob = np.min(self.replay_memory.memory_tree[-self.replay_memory.total:]) / self.replay_memory.total_p
-        max_weight = np.power(self.total_size * min_prob, -self.beta)
+        index_list = []
+        wts = np.empty((k, 1))
+        self.beta = min(1., self.beta + self.per_beta)
+        min_prob = np.min(self.replay_memory.mem_tree[-self.replay_memory.count_total:]) / self.replay_memory.total_p
+        max_weight = np.power(self.mem_size * min_prob, -self.beta)
         segment = self.replay_memory.total_p / k
         for i in range(k):
             s = np.random.uniform(segment * i, segment * (i + 1))
-            index, p, t = self.replay_memory.get_data(s)
-            id_list.append(index)
-            self.obs_b[i], self.act_b[i], self.rewards_b[i], self.next_states_b[i], self.b_dones[i] = t
-            # P(j)
-            sampling_probabilities = p / self.replay_memory.total_p     # where p = p ** self.alpha
-            wtss[i, 0] = np.power(self.total_size * sampling_probabilities, -self.beta) / max_weight
-        return id_list, wtss
+            i, p, t = self.replay_memory.getdata(s)
+            index_list.append(i)
+            self.b_observations[i], self.act_b[i], self.rewards_b[i], self.next_states_b[i], self.completed[i] = t
+            sampling_probabilities = p / self.replay_memory.total_
+            wts[i, 0] = np.power(self.mem_size * sampling_probabilities, -self.beta) / max_weight
+        return index_list, wts
 
     def calculate(self, env, render=True):
-        observation, done, ep_reward = env.reset(), False, 0
+        observations, done, reward_per_ep = env.reset(), False, 0
         while not done:
-            action, q_values = self.dqn.q_action(observation[None])  #[None] extendends the dimension from (4,) to (1,4)
-            observation, reward, done, info = env.step(action)
-            ep_reward += reward
+            action, q_values = self.dqn.action_value(observations[None])
+            observations, reward, done, info = env.step(action)
+            reward_per_ep += reward
             if render:
                 env.render()
-            time.sleep(0.05)
         env.close()
-        return ep_reward
+        return reward_per_ep
 
-    def store_transition(self, priority, observation, action, reward, next_state, done):
-        transition = [observation, action, reward, next_state, done]
-        self.replay_memory.appenddd(priority, transition)
+    def store_transition(self, priority, observations, action, reward, next_state, done):
+        transition = [observations, action, reward, next_state, done]
+        self.replay_memory.add(priority, transition)
 
     def rand_based_sample(self, k):
         pass
 
-    def action_model(self, choose_action):
+    def act(self, choose_action):
         if np.random.rand() < self.e:
             return self.env.action_space.sample()
         return choose_action
 
-    def update_target_dqn(self):
-        self.target_dqn.set_weights(self.dqn.get_data())
+    def change_target_dqn(self):
+        self.target_dqn.set_weights(self.dqn.get_weights())
 
-    def get_data_part_2(self, observation):
-        return self.target_dqn.predict(observation)
+    def get_target_value(self, observations):
+        return self.target_dqn.predict(observations)
 
     def e_decay(self):
         self.e *= self.e_decay
 
 
-if __name__ == '__main__':
-    test_dqn()
+test_dqn()
 
-    env = gym.make("CartPole-v0")
-    num_actions = env.action_space.n
-    dqn = DQN(num_actions)
-    target_dqn = DQN(num_actions)
-    agent = Agent(dqn, target_dqn, env)
-    rewards_sum = agent.calculate(env)
-    print("Before Training: %d out of 200" % rewards_sum)
+env = gym.make("CartPole-v0")
+num_actions = env.action_space.n
+dqn = Model(num_actions)
+target_dqn = Model(num_actions)
+agent = Agent(dqn, target_dqn, env)
+rewards_sum = agent.calculate(env)
+print("Prior Training Reward_Sum: %d out of 200" % rewards_sum)
 
-    agent.train()
-    rewards_sum = agent.calculate(env)
-    print("After Training: %d out of 200" % rewards_sum)
-
-
-# In[ ]:
+agent.train()
+rewards_sum = agent.calculate(env)
+print("Training Result Reward_Sum: %d out of 200" % rewards_sum)
