@@ -37,7 +37,7 @@ class Agent():
         self.epsilon = epsilon
         self.eps_min = eps_end
         self.lr = lr
-        self.action_space = [0,1,2,3,4,5] #Change this to n_actions for generalised application
+        self.action_space = np.arange(0,18,1) #Change this to n_actions for generalised application
         self.mem_size = max_mem_size
         self.batch_size = batch_size
         self.mem_cntr = 0
@@ -82,7 +82,7 @@ class Agent():
             state = T.tensor([state]).to(self.Q_eval.device)
             print(state.shape)
             actions = self.Q_eval.forward(state)
-            action = T.argmax(actions).item()
+            action = T.argmax(actions[1]).item()
         else:
             action = np.random.choice(self.action_space) #Here action_space = [0,1]
         
@@ -178,4 +178,5 @@ class Agent():
             losses.append(loss.item())
 
             self.Q_eval.optimizer.step()
+
 
