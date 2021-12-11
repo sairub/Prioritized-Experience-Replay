@@ -24,7 +24,6 @@ import torch as T
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import pylab
-import os
 
 class DQN(nn.Module):
     def __init__(self, ans, lr, input_dims, fc1_dims, fc2_dims,
@@ -76,14 +75,4 @@ class DQN(nn.Module):
             return val, actions
 
         return actions
-    
-    def save_checkpoint(self):
-        if not os.path.exists('Model'):
-            os.makedirs('Model')
-        print ("Your model is now saved")
-        T.save(self.state_dict(), self.checkpoint_file)
-    
-    def load_checkpoint(self):
-        print("checkpoint loaded...")
-        self.load_state_dict(T.load(self.checkpoint_file))
 
